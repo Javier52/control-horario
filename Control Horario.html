@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Control Horario</title>
+<style>
+  :root { --n:#1e88e5; --a:#fb8c00; --bg:#f5f6f8; --card:#fff; --tx:#1c1e21; --mu:#6b7280; --ok:#2e7d32; --ko:#c62828; }
+  @media (prefers-color-scheme: dark){ :root{ --bg:#14161a; --card:#1e2127; --tx:#eceff4; --mu:#9aa3af; } }
+  *{box-sizing:border-box} body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:var(--bg);color:var(--tx)}
+  main{max-width:760px;margin:0 auto;padding:16px;display:flex;flex-direction:column;gap:12px}
+  h1{font-size:22px;margin:0} .row{display:flex;gap:8px;align-items:center;justify-content:space-between}
+  .card{background:var(--card);border-radius:12px;padding:14px;box-shadow:0 1px 3px rgba(0,0,0,.08)}
+  #clock{width:100%;height:84px;border:0;border-radius:14px;font-size:24px;font-weight:700;color:#fff;cursor:pointer;background:var(--ok)}
+  #clock.out{background:var(--ko)}
+  button.t{background:none;border:0;color:var(--n);font-size:14px;cursor:pointer;padding:6px 8px}
+  button.t:disabled{color:var(--mu);cursor:default}
+  .mu{color:var(--mu);font-size:13px} .b{font-weight:700}
+  .leg{display:flex;gap:16px;font-size:13px} .leg i{display:inline-block;width:12px;height:12px;margin-right:6px;vertical-align:-1px}
+  svg text{fill:var(--mu);font-size:11px} .day h3{margin:0 0 4px;font-size:15px}
+  .ent{font-size:12px;color:var(--mu);display:flex;justify-content:space-between}
+  .ent button{border:0;background:none;color:var(--ko);cursor:pointer;font-size:12px}
+  dialog{border:0;border-radius:14px;padding:18px;max-width:92vw;width:420px;background:var(--card);color:var(--tx)}
+  dialog::backdrop{background:rgba(0,0,0,.4)} label{display:block;font-size:13px;margin:8px 0 2px;color:var(--mu)}
+  input{width:100%;padding:8px;border:1px solid #9994;border-radius:8px;font-size:15px;background:transparent;color:var(--tx)}
+  textarea{width:100%;height:240px;font:12px/1.4 ui-monospace,monospace;background:transparent;color:var(--tx);border:1px solid #9994;border-radius:8px;padding:8px}
+  .btn{padding:9px 14px;border-radius:8px;border:0;background:var(--n);color:#fff;font-size:14px;cursor:pointer}
+  .btn.g{background:#9993;color:var(--tx)} #msg{font-size:13px;margin-top:6px;min-height:18px}
+</style>
+</head>
+<body>
+<main>
+  <div class="row"><h1>Control horario</h1>
+    <div><button class="t" id="bAdd">+ Manual</button><button class="t" id="bRep">Informe</button></div></div>
+  <button id="clock">FICHAR ENTRADA</button>
+  <div class="card"><div id="status" class="b"></div><div id="today" class="mu"></div></div>
+  <button class="btn" id="sendNow" style="width:100%;padding:12px;font-size:15px">✉ Enviar informe por mail a javiermarcosfernandez@gmail.com</button>
+  <div id="sendMsg" class="mu" style="min-height:18px"></div>
+  <div class="row"><button class="t" id="prev">◀ Anterior</button><span id="wk" class="b"></span><button class="t" id="next">Siguiente ▶</button></div>
+  <div class="card"><svg id="chart" viewBox="0 0 700 240" width="100%" role="img" aria-label="Horas por día"></svg>
+    <div class="leg"><span><i style="background:var(--n)"></i>Normal</span><span><i style="background:var(--a)"></i>Alta demanda</span></div></div>
+  <div class="card"><div class="b" id="wTot"></div><div class="mu" id="wDet"></div></div>
+  <div id="days" style="display:flex;flex-direction:column;gap:8px"></div>
+  <div class="mu" id="sync"></div>
+</main>
+
+<dialog id="dRep"><div class="b">Informe diario</div>
+  <label>Enviar a</label><input id="to" value="javiermarcosfernandez@gmail.com">
+  <label>Informe</label><textarea id="repTxt" readonly></textarea>
+  <div id="msg"></div>
+  <div class="row" style="margin-top:10px"><button class="btn g" id="rClose">Cerrar</button>
+   <span><button class="btn g" id="rCopy">Copiar</button> <button class="btn" id="rSend">Enviar por Gmail</button></span></div></dialog>
+
+<dialog id="dAdd"><div class="b">Añadir fichaje manual</div>
+  <label>Entrada</label><input type="datetime-local" id="aS"><label>Salida</label><input type="datetime-local" id="aE">
+  <div id="aMsg" class="mu" style="color:var(--ko)"></div><div class="row" style="margin-top:12px"><button class="btn g" id="aClose">Cancelar</button><button class="btn" id="aOk">Añadir</button></div></dialog>
+
+<script>
+// CALC-START
+const WIN = {1:[[420,600],[960,1200]],2:[[420,600],[960,1200]],3:[[420,600],[960,1200]],4:[[420,600],[960,1200]],5:[[780,1440]],6:[[0,360]],0:[[0,360]]};
+const msAt = (d, min) => new Date(d.getFullYear(), d.getMonth(), d.getDate(), 0, min).getTime();
+function split(date, s, e) {
+  const ds = msAt(date, 0), de = msAt(date, 1440);
+  const cs = Math.max(s, ds), ce = Math.min(e, de);
+  if (ce <= cs) return {n:0, h:0};
+  let h = 0;
+  for (const [a, b] of WIN[date.getDay()]) h += Math.max(0, Math.min(ce, msAt(date, b)) - Math.max(cs, msAt(date, a)));
+  return {n: (ce - cs) - h, h};
+}
+function forDay(date, entries, now) {
+  return entries.reduce((acc, en) => { const r = split(date, en.s, en.e ?? now); return {n: acc.n + r.n, h: acc.h + r.h}; }, {n:0, h:0});
+}
+const fmt = ms => { const m = Math.floor(ms / 60000); return Math.floor(m / 60) + 'h ' + String(m % 60).padStart(2, '0') + 'm'; };
+const mondayOf = d => { const x = new Date(d.getFullYear(), d.getMonth(), d.getDate()); x.setDate(x.getDate() - ((x.getDay() + 6) % 7)); return x; };
+// CALC-END
+
+const $ = id => document.getElementById(id);
+const pad = n => String(n).padStart(2, '0');
+const hm = ms => { const d = new Date(ms); return pad(d.getHours()) + ':' + pad(d.getMinutes()); };
+const dm = d => pad(d.getDate()) + '/' + pad(d.getMonth() + 1);
+const DN = ['domingo','lunes','martes','miércoles','jueves','viernes','sábado'];
+const addDays = (d, n) => { const x = new Date(d); x.setDate(x.getDate() + n); return x; };
+
+let entries = []; let weekOffset = 0; let now = Date.now();
+const LS = 'control_horario_v1';
+function loadLocal(){ try { return JSON.parse(localStorage.getItem(LS) || '[]'); } catch(e){ return []; } }
+let dbDoc = null;
+function persist() {
+  try { localStorage.setItem(LS, JSON.stringify(entries)); } catch(e) {}
+  if (dbDoc) { Promise.resolve(dbDoc.set({entries})).catch(() => { $('sync').textContent = 'Solo guardado en este navegador (sin sincronizar).'; }); }
+}
+function clippedEntries(date, now) {
+  const ds = msAt(date, 0), de = msAt(date, 1440);
+  return entries.map((en, i) => ({i, s: Math.max(en.s, ds), e: Math.min(en.e ?? now, de), open: en.e == null})).filter(x => x.e > x.s);
+}
+
+function reportText(date) {
+  const L = [];
+  L.push(`INFORME DIARIO DE HORAS - ${DN[date.getDay()]} ${dm(date)}/${date.getFullYear()}`, '='.repeat(48), '', 'FICHAJES DEL DÍA');
+  const cl = clippedEntries(date, now);
+  if (!cl.length) L.push('  (sin fichajes)');
+  cl.forEach(x => { const r = split(date, x.s, x.e); L.push(`  ${hm(x.s)} - ${hm(x.e)}  total ${fmt(r.n + r.h)}  (normal ${fmt(r.n)} | alta demanda ${fmt(r.h)})${x.open ? ' [fichaje abierto]' : ''}`); });
+  const d = forDay(date, entries, now);
+  L.push('', 'TOTAL DEL DÍA', `  Horas normales:      ${fmt(d.n)}`, `  Horas alta demanda:  ${fmt(d.h)}`, `  Total:               ${fmt(d.n + d.h)}`, '');
+  const mon = mondayOf(date); let wn = 0, wh = 0;
+  L.push(`RESUMEN SEMANAL (${dm(mon)} - ${dm(addDays(mon, 6))}/${addDays(mon, 6).getFullYear()})`);
+  for (let i = 0; i < 7; i++) { const x = addDays(mon, i), s = forDay(x, entries, now); wn += s.n; wh += s.h;
+    L.push(`  ${(DN[x.getDay()].slice(0,3) + ' ' + dm(x)).padEnd(11)} normal ${fmt(s.n).padEnd(8)} alta ${fmt(s.h).padEnd(8)} total ${fmt(s.n + s.h)}`); }
+  L.push('  ' + '-'.repeat(46), `  SEMANA      normal ${fmt(wn).padEnd(8)} alta ${fmt(wh).padEnd(8)} total ${fmt(wn + wh)}`, '',
+    'Franjas de alta demanda: L-J 07-10 y 16-20 | V 13-24 | S-D 00-06');
+  return L.join('\n');
+}
+
+function chart(days) {
+  const W = 700, H = 240, left = 44, top = 24, bottom = 28, ch = H - top - bottom, slot = (W - left) / 7, bw = slot * 0.6;
+  const maxMs = Math.max(3600000, ...days.map(d => d.s.n + d.s.h)); const maxH = Math.ceil(maxMs / 3600000);
+  let g = '';
+  for (let k = 0; k <= 4; k++) { const y = top + ch - ch * k / 4;
+    g += `<line x1="${left}" x2="${W}" y1="${y}" y2="${y}" stroke="#9994"/><text x="${left - 6}" y="${y + 4}" text-anchor="end">${(maxH * k / 4).toFixed(maxH % 4 ? 1 : 0)}h</text>`; }
+  const lab = ['L','M','X','J','V','S','D'];
+  days.forEach((d, i) => {
+    const x = left + slot * i + (slot - bw) / 2, hn = ch * d.s.n / 3600000 / maxH, hh = ch * d.s.h / 3600000 / maxH, base = top + ch;
+    g += `<rect x="${x}" y="${base - hn}" width="${bw}" height="${hn}" fill="#1e88e5"/><rect x="${x}" y="${base - hn - hh}" width="${bw}" height="${hh}" fill="#fb8c00"/>`;
+    if (d.s.n + d.s.h > 0) g += `<text x="${x + bw / 2}" y="${base - hn - hh - 4}" text-anchor="middle">${fmt(d.s.n + d.s.h).replace(' ', '')}</text>`;
+    g += `<text x="${x + bw / 2}" y="${H - 8}" text-anchor="middle">${lab[i]}</text>`;
+  });
+  $('chart').innerHTML = g;
+}
+
+function render() {
+  const active = entries.find(e => e.e == null);
+  $('clock').textContent = active ? 'FICHAR SALIDA' : 'FICHAR ENTRADA'; $('clock').className = active ? 'out' : '';
+  $('status').textContent = active ? `En curso desde ${hm(active.s)} · ${fmt(now - active.s)}` : 'Sin fichaje abierto';
+  const t = forDay(new Date(), entries, now);
+  $('today').textContent = `Hoy: ${fmt(t.n + t.h)}  ·  Normales ${fmt(t.n)}  ·  Alta demanda ${fmt(t.h)}`;
+  const mon = addDays(mondayOf(new Date()), 7 * weekOffset);
+  $('wk').textContent = `${dm(mon)} - ${dm(addDays(mon, 6))}/${addDays(mon, 6).getFullYear()}`; $('next').disabled = weekOffset >= 0;
+  const days = [0,1,2,3,4,5,6].map(i => { const d = addDays(mon, i); return {d, s: forDay(d, entries, now)}; });
+  chart(days);
+  const w = days.reduce((a, x) => ({n: a.n + x.s.n, h: a.h + x.s.h}), {n:0, h:0});
+  $('wTot').textContent = `Total semana: ${fmt(w.n + w.h)}`; $('wDet').textContent = `Normales ${fmt(w.n)} · Alta demanda ${fmt(w.h)}`;
+  $('days').innerHTML = days.map(({d, s}) => {
+    const rows = clippedEntries(d, now).map(x => { const r = split(d, x.s, x.e);
+      return `<div class="ent"><span>${hm(x.s)} - ${hm(x.e)}${x.open ? ' (en curso)' : ''} &nbsp; n ${fmt(r.n)} / a ${fmt(r.h)}</span>${x.open ? '' : `<button data-del="${x.i}">borrar</button>`}</div>`; }).join('');
+    return `<div class="card day"><h3>${DN[d.getDay()][0].toUpperCase() + DN[d.getDay()].slice(1)} ${dm(d)}</h3><div class="mu">Total ${fmt(s.n + s.h)} (normal ${fmt(s.n)} · alta ${fmt(s.h)})</div>${rows}</div>`; }).join('');
+  document.querySelectorAll('[data-del]').forEach(b => b.onclick = () => { entries.splice(+b.dataset.del, 1); persist(); render(); });
+}
+
+$('clock').onclick = () => { const i = entries.findIndex(e => e.e == null); if (i >= 0) entries[i].e = Date.now(); else entries.push({s: Date.now(), e: null}); persist(); render(); };
+$('prev').onclick = () => { weekOffset--; render(); }; $('next').onclick = () => { if (weekOffset < 0) { weekOffset++; render(); } };
+$('bRep').onclick = () => { now = Date.now(); $('repTxt').value = reportText(new Date()); $('msg').textContent = ''; $('dRep').showModal(); };
+$('rClose').onclick = () => $('dRep').close();
+$('sendNow').onclick = async () => {
+  const btn = $('sendNow'), out = $('sendMsg'); btn.disabled = true; out.style.color = ''; out.textContent = 'Enviando…';
+  now = Date.now(); const d = new Date(), text = reportText(d);
+  try {
+    const mcp = await claude.use('mcp'); if (!mcp) throw new Error('el envío por Gmail no está disponible en esta vista');
+    await mcp.callTool('Gmail', 'send_message', {to: ['javiermarcosfernandez@gmail.com'], subject: `Informe de horas ${dm(d)}/${d.getFullYear()}`, body: text});
+    out.textContent = 'Informe enviado a javiermarcosfernandez@gmail.com (' + hm(Date.now()) + ').';
+  } catch (e) {
+    out.style.color = 'var(--ko)'; out.textContent = 'No se pudo enviar: ' + (e && e.message ? e.message : e) + '. Abre «Informe» para copiar el texto.';
+  } finally { btn.disabled = false; }
+};
+$('rCopy').onclick = async () => { try { await navigator.clipboard.writeText($('repTxt').value); $('msg').textContent = 'Copiado.'; } catch(e) { $('repTxt').select(); $('msg').textContent = 'Selecciona y copia el texto manualmente.'; } };
+$('rSend').onclick = async () => {
+  $('msg').textContent = 'Enviando…';
+  try {
+    const mcp = await claude.use('mcp'); if (!mcp) throw new Error('Gmail no disponible en esta vista');
+    const d = new Date();
+    await mcp.callTool('Gmail', 'send_message', {to: [$('to').value.trim()], subject: `Informe de horas ${dm(d)}/${d.getFullYear()}`, body: $('repTxt').value});
+    $('msg').textContent = 'Informe enviado.';
+  } catch (e) { $('msg').textContent = 'No se pudo enviar: ' + (e && e.message ? e.message : e) + '. Usa Copiar y pégalo en un correo.'; }
+};
+$('bAdd').onclick = () => $('dAdd').showModal(); $('aClose').onclick = () => $('dAdd').close();
+$('aOk').onclick = () => { const s = new Date($('aS').value).getTime(), e = new Date($('aE').value).getTime();
+  if (!isFinite(s) || !isFinite(e) || e <= s) { $('aMsg').textContent = 'Revisa las fechas: la salida debe ser posterior a la entrada.'; return; } entries.push({s, e}); entries.sort((a, b) => a.s - b.s); persist(); $('dAdd').close(); render(); };
+
+entries = loadLocal(); render();
+setInterval(() => { now = Date.now(); render(); }, 30000);
+
+// Sincronización opcional (best effort): el estado principal está en este navegador.
+(async () => {
+  try {
+    const db = await claude.use('db'); if (!db) { $('sync').textContent = 'Datos guardados solo en este navegador.'; return; }
+    const user = await claude.use('user'); const id = user && user.id ? await user.id() : null; if (!id) return;
+    dbDoc = db.collection('data/users/' + id).doc('fichajes');
+    const handle = snap => { const data = snap && (typeof snap.data === 'function' ? snap.data() : snap); const rem = data && data.entries;
+      if (Array.isArray(rem)) { const key = e => e.s; const map = new Map(entries.map(e => [key(e), e])); rem.forEach(e => { const l = map.get(key(e)); if (!l || (l.e == null && e.e != null)) map.set(key(e), e); });
+        entries = [...map.values()].sort((a, b) => a.s - b.s); try { localStorage.setItem(LS, JSON.stringify(entries)); } catch(_){} render(); } $('sync').textContent = 'Sincronizado entre dispositivos.'; };
+    if (dbDoc.get) { handle(await dbDoc.get()); persist(); }
+  } catch (e) { $('sync').textContent = 'Datos guardados solo en este navegador.'; }
+})();
+</script>
+</body>
+</html>
